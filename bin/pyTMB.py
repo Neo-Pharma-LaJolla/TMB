@@ -14,7 +14,7 @@
 #
 ##############################################################################
 
-__version__ = '1.3.0'
+__version__ = '1.3.0_NeoGenomics'
 
 """
 This script is designed to calculate a TMB score from a VCF file.
@@ -263,9 +263,11 @@ def argsParse():
     parser.add_argument("--maf", help="Filter variants with MAF > maf", type=float, default=0.001)
     parser.add_argument("--minDepth", help="Filter variants with depth < minDepth", type=int, default=5)
     parser.add_argument("--minAltDepth", help="Filter variants with alternative allele depth <= minAltDepth", type=int, default=2)
+    parser.add_argument("--filterQUALvalue", help="Filter variants with QUAL < value", type=float, default=0.0)
 
     # Which variants to use
-    parser.add_argument("--filterLowQual", help="Filter low quality (i.e not PASS) variant", action="store_true")
+    parser.add_argument("--filterNonPASS", help="Filter variants without PASS in Filter field", action="store_true")
+    parser.add_argument("--filterLowQual", help="Filter low quality (i.e not PASS) variant or QUAL is not null", action="store_true")
     parser.add_argument("--filterIndels", help="Filter insertions/deletions", action="store_true")
     parser.add_argument("--filterCoding", help="Filter Coding variants", action="store_true")
     parser.add_argument("--filterSplice", help="Filter Splice variants", action="store_true")
@@ -285,6 +287,7 @@ def argsParse():
     parser.add_argument("--debug", help="Export original VCF with TMB_FILTER tag", action="store_true")
     parser.add_argument("--export", help="Export a VCF with the considered variants", action="store_true")
     parser.add_argument("--version", help="Version number", action='version', version="%(prog)s ("+__version__+")")
+    parser.add_argument("--outdir", help="Output Dir", type=str, default=".")
 
     args = parser.parse_args()
     return (args)
@@ -316,13 +319,13 @@ if __name__ == "__main__":
 
     # Ouptuts
     if args.export:
-        wx = cyvcf2.Writer(re.sub(r'\.vcf$|\.vcf.gz$|\.bcf',
-                                  '_export.vcf', os.path.basename(args.vcf)), vcf)
+        wx = cyvcf2.Writer(os.path.join(args.outdir, re.sub(r'\.vcf$|\.vcf.gz$|\.bcf',
+                                  '_export.vcf', os.path.basename(args.vcf))), vcf)
     if args.debug:
         vcf.add_info_to_header({'ID': 'TMB_FILTERS', 'Description': 'Detected filters for TMB calculation',
                                 'Type': 'Character', 'Number': '1'})
-        wd = cyvcf2.Writer(re.sub(r'\.vcf$|\.vcf.gz$|\.bcf',
-                                  '_debug.vcf', os.path.basename(args.vcf)), vcf)
+        wd = cyvcf2.Writer(os.path.join(args.outdir, re.sub(r'\.vcf$|\.vcf.gz$|\.bcf',
+                                  '_debug.vcf', os.path.basename(args.vcf))), vcf)
 
     # Load config
     dbFlags = loadConfig(args.dbConfig)
@@ -348,7 +351,8 @@ if __name__ == "__main__":
         if (varCounter % 1000 == 0 and args.verbose):
             print ("## ", varCounter)
             if args.debug and varCounter == 1000:
-                sys.exit()
+                pass
+                #sys.exit()
 
         try:
             # All vcf INFO
@@ -378,6 +382,20 @@ if __name__ == "__main__":
                 debugInfo = ",".join([debugInfo, "QUAL"])
                 if not args.debug:
                     continue
+
+            # Variant does not have PASS in the FILTER column
+            # if cyvcf2 reads '.' or 'PASS' for FILTER it sets variant.FILTER to None
+            if args.filterNonPASS and variant.FILTER is not None:
+                debugInfo = ",".join([debugInfo, "NON_PASS"])
+                if not args.debug:
+                    continue
+
+            # Variant has QUAL value below threshold
+            if args.filterQUALvalue != 0.0:
+                if variant.QUAL < args.filterQUALvalue:
+                    debugInfo = ",".join([debugInfo, "QUAL_VALUE_BELOW_THRESHOLD"])
+                    if not args.debug:
+                        continue
 
             #######################
             # FORMAT
@@ -522,6 +540,12 @@ if __name__ == "__main__":
     print("minDepth=", args.minDepth)
     print("minAltDepth=", args.minAltDepth)
     print("filterLowQual=", args.filterLowQual)
+    if args.filterQUALvalue == 0.0:
+        # If default value or 0.0 this filter is ignored
+        print("filterQUALvalue= False")
+    else:
+        print("filterQUALvalue=", args.filterQUALvalue)
+    print("filterNonPASS=", args.filterNonPASS)
     print("filterIndels=", args.filterIndels)
     print("filterCoding=", args.filterCoding)
     print("filterNonCoding=", args.filterNonCoding)
